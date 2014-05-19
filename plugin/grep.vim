@@ -1,3 +1,14 @@
+" Joey's notes:
+"
+" CONSIDER: / is great for searching in a file, but sometimes (Java) I want to
+" search through lots of files.  grep.vim is still a bit clunky even if I have
+" it bound to F3.  I suggest a keybind similar to '/' (perhaps Ctrl-/ in GVim)
+" which will automatically and immediately perform a grep search, and would
+" also rebind 'n' to step through the grep results.  This would make Ctrl-/
+" feel basically identical to normal /.  We can unbind n back to its normal
+" mapping the next time the normal / is used.
+" We might even do similar for Ctrl-* and #, not forgetting ? and N.
+
 " File: grep.vim
 " Author: Yegappan Lakshmanan
 " Version: 1.3
@@ -166,45 +177,45 @@
 "       :let Grep_Skip_Files = '*.bak *'
 "
 " --------------------- Do not modify after this line ---------------------
-if exists("loaded_grep") || &cp
-    finish
-endif
+" if exists("loaded_grep") || &cp
+    " finish
+" endif
 let loaded_grep = 1
 
 " Location of the grep utility
 if !exists("Grep_Path")
     "let Grep_Path = 'd:\unix_tools\grep.exe'
-    let Grep_Path = '/usr/bin/grep'
+    let Grep_Path = 'grep'
 endif
 
 " Location of the fgrep utility
 if !exists("Fgrep_Path")
     "let Fgrep_Path = 'd:\unix_tools\fgrep.exe'
-    let Fgrep_Path = '/usr/bin/fgrep'
+    let Fgrep_Path = 'fgrep'
 endif
 
 " Location of the egrep utility
 if !exists("Egrep_Path")
     "let Egrep_Path = 'd:\unix_tools\egrep.exe'
-    let Egrep_Path = '/usr/bin/egrep'
+    let Egrep_Path = 'egrep'
 endif
 
 " Location of the agrep utility
 if !exists("Agrep_Path")
     "let Agrep_Path = 'd:\unix_tools\agrep.exe'
-    let Agrep_Path = '/usr/local/bin/agrep'
+    let Agrep_Path = 'agrep'
 endif
 
 " Location of the find utility
 if !exists("Grep_Find_Path")
     "let Grep_Find_Path = 'd:\unix_tools\find.exe'
-    let Grep_Find_Path = '/usr/bin/find'
+    let Grep_Find_Path = 'find'
 endif
 
 " Location of the xargs utility
 if !exists("Grep_Xargs_Path")
     "let Grep_Xargs_Path = 'd:\unix_tools\xargs.exe'
-    let Grep_Xargs_Path = '/usr/bin/xargs'
+    let Grep_Xargs_Path = 'xargs'
 endif
 
 " Open the Grep output window.  Set this variable to zero, to not open
@@ -277,10 +288,16 @@ if !exists("Grep_Skip_Files")
     let Grep_Skip_Files = '*~ *,v s.*'
 endif
 
+let Grep_Using_CodeSearch = ( match(Grep_Path, '^csearch$\|/csearch$') >= 0 ? 1 : 0 )
+
+let Grep_Allow_Empty_FileList = Grep_Using_CodeSearch
+
 " --------------------- Do not edit after this line ------------------------
 
 " Map a key to invoke grep on a word under cursor.
-exe "nnoremap <unique> <silent> " . Grep_Key . " :call <SID>RunGrep('grep')<CR>"
+silent exe "nnoremap <silent> " . Grep_Key . " :call RunGrep('grep')<CR>"
+
+
 
 " RunGrepCmd()
 " Run the specified grep command using the supplied pattern
@@ -303,7 +320,12 @@ function! s:RunGrepCmd(cmd, pattern)
     let old_efm = &efm
     set efm=%f:%\\s%#%l:%m
 
-    execute "silent! cfile " . tmpfile
+    "normal mG
+    "echo "Current position stored in mG, use g'G to get back here."
+
+    "execute "silent! cfile " . tmpfile
+    "" Joey: don't jump to first occurrence
+    execute "silent! cgetfile " . tmpfile
 
     let &efm = old_efm
 
@@ -311,10 +333,30 @@ function! s:RunGrepCmd(cmd, pattern)
     if g:Grep_OpenQuickfixWindow == 1
         " Open the quickfix window below the current window
         botright copen
-    endif
+        " Hide it from Buffer Explorer plugins
+        setlocal nobuflisted
+        " We could help size it a bit
+        let targetHeight = line('$') + 1
+        let maxHeight = max([ &lines / 4, winheight(0) ])
+        let targetHeight = min([ targetHeight, maxHeight ])
+        exec "resize ".targetHeight
+        " We can set a nice title, but with statusline it does not survive :colder and :cnewer
+        let &l:statusline = 'Search results for ' . a:pattern . ''
+        " If this plugin is present, it can restore the title after :colder and :cnewer
+        if exists('*g:SetQuickfixTitle')
+            call g:SetQuickfixTitle(&l:statusline)
+        endif
 
-    " Jump to the first error
-    cc
+        if exists(":FoldByFiles")
+            exec "FoldByFiles"
+        endif
+
+        " Jump to the first error (useful because it forces the focus back to the editing window, rather than leaving it in the clist.)
+        "cc
+        "exe "cc"
+        " Now I have decided that focus on the clist is good.  I may not want to jump to the first result, e.g. if it's in an unopened file I'm not really interested in, then it would just pollute my buffer list.
+
+    endif
 
     call delete(tmpfile)
 endfunction
@@ -328,6 +370,8 @@ function! s:RunGrepRecursive(grep_cmd, ...)
     else
         " Use the specified grep options
         let grep_opt = a:1
+        "" Joey:
+        let g:Grep_Default_Options = grep_opt
     endif
 
     if a:grep_cmd == 'grep'
@@ -353,13 +397,13 @@ function! s:RunGrepRecursive(grep_cmd, ...)
     endif
     let pattern = g:Grep_Shell_Quote_Char . pattern . g:Grep_Shell_Quote_Char
 
-    let startdir = input("Start searching from directory: ", getcwd())
+    let startdir = input("Start searching from directory: ", getcwd(), "dir")
     if startdir == ""
         return
     endif
 
     let filepattern = input("Grep in files matching pattern: ", 
-                                      \ g:Grep_Default_Filelist)
+                                      \ g:Grep_Default_Filelist, "file")
     if filepattern == ""
         return
     endif
@@ -431,9 +475,10 @@ function! s:RunGrepRecursive(grep_cmd, ...)
     call s:RunGrepCmd(cmd, pattern)
 endfunction
 
-" RunGrepBuffer()
-" Grep for a pattern in all the opened buffers
-function! s:RunGrepBuffer(...)
+" GetBufferFilenames()
+" returns a space-separated string of all the buffernames
+function! s:GetBufferFilenames()
+
     " Get a list of all the buffer names
     let last_bufno = bufnr("$")
 
@@ -447,6 +492,16 @@ function! s:RunGrepBuffer(...)
         let i = i + 1
     endwhile
 
+    return filenames
+
+endfunction
+
+
+" RunGrepBuffer()
+" Grep for a pattern in all the opened buffers
+function! s:RunGrepBuffer(...)
+
+    let filenames = s:GetBufferFilenames()
     " No buffers
     if filenames == ""
         return
@@ -469,9 +524,11 @@ function! s:RunGrepBuffer(...)
 
     " Add /dev/null to the list of filenames, so that grep print the
     " filename and linenumber when grepping in a single file
-    let filenames = filenames . " " . g:Grep_Null_Device
-    let cmd = g:Grep_Path . " " . grep_opt . " -n -- "
-    let cmd = cmd . pattern . " " . filenames
+    if !g:Grep_Using_CodeSearch
+        let pattern = "-- " . pattern
+        let filenames = filenames . " " . g:Grep_Null_Device
+    endif
+    let cmd = g:Grep_Path . " " . grep_opt . " -n " . pattern . " " . filenames
 
     call s:RunGrepCmd(cmd, pattern)
 endfunction
@@ -497,7 +554,7 @@ function! s:RunGrepArgs(...)
     endwhile
 
     " No arguments
-    if filenames == ""
+    if filenames == "" && !g:Grep_Allow_Empty_FileList
         echohl WarningMsg | 
         \ echomsg "Error: No filenames specified in the argument list " |
         \ echohl None
@@ -521,16 +578,18 @@ function! s:RunGrepArgs(...)
 
     " Add /dev/null to the list of filenames, so that grep print the
     " filename and linenumber when grepping in a single file
-    let filenames = filenames . " " . g:Grep_Null_Device
-    let cmd = g:Grep_Path . " " . grep_opt . " -n -- "
-    let cmd = cmd . pattern . " " . filenames
+    if !g:Grep_Using_CodeSearch
+        let pattern = "-- " . pattern
+        let filenames = filenames . " " . g:Grep_Null_Device
+    endif
+    let cmd = g:Grep_Path . " " . grep_opt . " -n " . pattern . " " . filenames
 
     call s:RunGrepCmd(cmd, pattern)
 endfunction
 
 " RunGrep()
 " Run the specified grep command
-function! s:RunGrep(grep_cmd, ...)
+function! RunGrep(grep_cmd, ...)
     if a:0 == 0 || a:1 == ''
         " No options are specified. Use the default grep options
         let grep_opt = g:Grep_Default_Options
@@ -539,56 +598,91 @@ function! s:RunGrep(grep_cmd, ...)
         let grep_opt = a:1
     endif
 
+    "" Joey doesn't like -e, because he wants to pass his own options to grep,
+    "" e.g. -r and -i, which he does when entering the file list.
+    let grep_expr_option = ''
     if a:grep_cmd == 'grep'
         let grep_path = g:Grep_Path
-        let grep_expr_option = '--'
+        " let grep_expr_option = '--'
     elseif a:grep_cmd == 'fgrep'
         let grep_path = g:Fgrep_Path
-        let grep_expr_option = '-e'
+        " let grep_expr_option = '-e'
     elseif a:grep_cmd == 'egrep'
         let grep_path = g:Egrep_Path
-        let grep_expr_option = '-e'
+        " let grep_expr_option = '-e'
     elseif a:grep_cmd == 'agrep'
         let grep_path = g:Agrep_Path
-        let grep_expr_option = '-e'
+        " let grep_expr_option = '-e'
     else
         return
     endif
 
     " No argument supplied. Get the identifier and file list from user
-    let pattern = input("Grep for pattern: ", expand("<cword>"))
+    " let pattern = input("Grep for pattern: ", expand("<cword>"))
+    "" Joey:
+    " let pattern = input("Grep for pattern: ", "\\<" . expand("<cword>") . "\\>" )
+    let str = expand("<cword>")
+    "" <cfile> grabs a little more than <cword> but not as much as <cWORD>:
+    " let str = expand("<cfile>")
+    let wordboundary_pre  = g:Grep_Using_CodeSearch ? '\b' : '\<'
+    let wordboundary_post = g:Grep_Using_CodeSearch ? '\b' : '\>'
+    " We add \<...\> wrappers only when appropriate:
+    if match(str,"^[0-9a-zA-Z_]") >= 0
+       let str = wordboundary_pre . str
+    endif
+    if match(str,"[0-9a-zA-Z_]$") >= 0
+       let str = str . wordboundary_post
+    endif
+    let pattern = input("Grep for pattern: ", str)
+
     if pattern == ""
         return
     endif
     let pattern = g:Grep_Shell_Quote_Char . pattern . g:Grep_Shell_Quote_Char
 
-    let filenames = input("Grep in files: ", g:Grep_Default_Filelist)
-    if filenames == ""
+    let filenames = input("Grep in files: ", g:Grep_Default_Filelist, "file")
+    if filenames == "" && !g:Grep_Allow_Empty_FileList
         return
     endif
+    let g:Grep_Default_Filelist = filenames
 
     echo "\n"
 
     " Add /dev/null to the list of filenames, so that grep print the
     " filename and linenumber when grepping in a single file
+    if !g:Grep_Using_CodeSearch
+        let pattern = grep_expr_option . " " . pattern
+        let filenames = filenames . " " . g:Grep_Null_Device
+    endif
+    let cmd = grep_path . " " . grep_opt . " -n " . grep_expr_option . " " . pattern . " " . filenames
     let filenames = filenames . " " . g:Grep_Null_Device
-    let cmd = grep_path . " " . grep_opt . " -n "
-    let cmd = cmd . grep_expr_option . " " . pattern
-    let cmd = cmd . " " . filenames
+    "" Joey:
+    " let cmd = cmd . "\\<" . pattern . "\\>"
+    "" Joey:
+    " let cmd = cmd . " 2>/dev/null"
+    " let cmd = cmd . " | " . g:Grep_Path . " -v '^\\\(grep: .*: Is a directory\|Binary file .*matches\\\)$'"
+    let cmd = cmd . " 2>&1"
+    let cmd = cmd . " | grep -v '^Binary file .*matches$'"
+    let cmd = cmd . " | grep -v '^grep: .*: Is a directory$'"
 
     call s:RunGrepCmd(cmd, pattern)
 endfunction
 
 " Define the set of grep commands
-command! -nargs=* Grep call s:RunGrep('grep', <q-args>)
+command! -nargs=* Grep call RunGrep('grep', <q-args>)
 command! -nargs=* Rgrep call s:RunGrepRecursive('grep', <q-args>)
 command! -nargs=* GrepBuffer call s:RunGrepBuffer(<q-args>)
 command! -nargs=* GrepArgs call s:RunGrepArgs(<q-args>)
 
-command! -nargs=* Fgrep call s:RunGrep('fgrep', <q-args>)
+command! -nargs=* Fgrep call RunGrep('fgrep', <q-args>)
 command! -nargs=* Rfgrep call s:RunGrepRecursive('fgrep', <q-args>)
-command! -nargs=* Egrep call s:RunGrep('egrep', <q-args>)
+command! -nargs=* Egrep call RunGrep('egrep', <q-args>)
 command! -nargs=* Regrep call s:RunGrepRecursive('egrep', <q-args>)
-command! -nargs=* Agrep call s:RunGrep('agrep', <q-args>)
+command! -nargs=* Agrep call RunGrep('agrep', <q-args>)
 command! -nargs=* Ragrep call s:RunGrepRecursive('agrep', <q-args>)
 
+"" Joey notes: I had to remove s: from all RunGrep's to allow this:
+if has("menu")
+	amenu &Tools.&Grep\ Files\ (F3) :call RunGrep('grep')<CR>
+	amenu &Tools.Grep\ &Buffers :call RunGrepBuffer('grep')<CR>
+endif
