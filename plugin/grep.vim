@@ -413,7 +413,7 @@ endif
 
 let Grep_Using_CodeSearch = ( match(Grep_Path, '^csearch$\|/csearch$') >= 0 ? 1 : 0 )
 
-let Grep_Allow_Empty_FileList = Grep_Using_CodeSearch
+let Grep_Force_Empty_FileList = Grep_Using_CodeSearch
 
 " --------------------- Do not edit after this line ------------------------
 
@@ -507,7 +507,7 @@ function! s:RunGrepCmd(cmd, pattern, action)
         let targetHeight = min([ targetHeight, maxHeight ])
         exec "resize ".targetHeight
         " We can set a nice title, but with statusline it does not survive :colder and :cnewer
-        let &l:statusline = 'Search results for ' . a:pattern . ''
+        let &l:statusline = 'Search results for ' . a:pattern . ' %=(%l/%L)'
         " If this plugin is present, it can restore the title after :colder and :cnewer
         if exists('*g:SetQuickfixTitle')
             call g:SetQuickfixTitle(&l:statusline)
@@ -753,7 +753,7 @@ function! s:RunGrepSpecial(cmd_name, which, action, ...)
         " Search in all the filenames in the argument list
         let arg_cnt = argc()
 
-        if arg_cnt == 0 && !g:Grep_Allow_Empty_FileList
+        if arg_cnt == 0 && !g:Grep_Force_Empty_FileList
             echohl WarningMsg
             echomsg "Error: Argument list is empty"
             echohl None
@@ -769,7 +769,7 @@ function! s:RunGrepSpecial(cmd_name, which, action, ...)
         endwhile
 
         " No arguments
-        if filenames == "" && !g:Grep_Allow_Empty_FileList
+        if filenames == "" && !g:Grep_Force_Empty_FileList
             echohl WarningMsg
             echomsg "Error: Argument list is empty"
             echohl None
@@ -865,14 +865,15 @@ function! s:RunGrep(cmd_name, grep_cmd, action, ...)
         let grep_opt = g:Grep_Default_Options
     endif
 
-    if a:grep_cmd != 'agrep'
+    if a:grep_cmd != 'agrep' && !g:Grep_Using_CodeSearch
         " Don't display messages about non-existent files
-        " Agrep doesn't support the -s option
+        " Agrep and CSearch don't support the -s option
         let grep_opt = grep_opt . " -s"
     endif
 
-    "" Joey doesn't like -e, because he wants to pass his own options to grep,
-    "" e.g. -r and -i, which he does when entering the file list.
+    "" Joey doesn't like -e, because he wants to pass regexps to grep, not just strings.
+    "" Similarly he doesn't like -- because he likes to pass his own options to the filelist prompt, e.g. -r and -i.
+    "" However since he only uses grep_cmd='grep', the later changes could be reverted.
     let grep_expr_option = ''
     if a:grep_cmd == 'grep'
         let grep_path = g:Grep_Path
@@ -916,7 +917,7 @@ function! s:RunGrep(cmd_name, grep_cmd, action, ...)
         echo "\r"
     endif
 
-    if filenames == "" && !g:Grep_Allow_Empty_FileList
+    if filenames == "" && !g:Grep_Force_Empty_FileList
         if v:version >= 700
             let filenames = input("Search in files: ", g:Grep_Default_Filelist,
                         \ "file")
@@ -927,8 +928,12 @@ function! s:RunGrep(cmd_name, grep_cmd, action, ...)
             return
         endif
         echo "\r"
+        let g:Grep_Default_Filelist = filenames
     endif
-    let g:Grep_Default_Filelist = filenames
+
+    if g:Grep_Force_Empty_FileList
+        let filenames = ""
+    endif
 
     " Add /dev/null to the list of filenames, so that grep print the
     " filename and linenumber when grepping in a single file
@@ -948,6 +953,19 @@ function! s:RunGrep(cmd_name, grep_cmd, action, ...)
     let cmd = cmd . " | grep -v '^grep: .*: Is a directory$'"
 
     call s:RunGrepCmd(cmd, pattern, a:action)
+endfunction
+
+function! s:SwitchToCSearch()
+    let g:Grep_Path = 'csearch'
+    let g:Grep_Using_CodeSearch = 1
+    let g:Grep_Force_Empty_FileList = 1
+    echo "Don't forget to run 'cindex' to keep searches up-to-date!"
+endfunction
+
+function! s:SwitchToGrep()
+    let g:Grep_Path = 'grep'
+    let g:Grep_Using_CodeSearch = 0
+    let g:Grep_Force_Empty_FileList = 0
 endfunction
 
 " Define the set of grep commands
@@ -1000,6 +1018,10 @@ command! -nargs=* -complete=file AgrepAdd
 command! -nargs=* -complete=file RagrepAdd
             \ call s:RunGrepRecursive('RagrepAdd', 'agrep', 'add', <f-args>)
 endif
+
+" Convenience commands
+command! SwitchToCSearch call s:SwitchToCSearch()
+command! SwitchToGrep    call s:SwitchToGrep()
 
 " Add the Tools->Search Files menu
 if has('gui_running')
