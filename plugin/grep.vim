@@ -506,9 +506,12 @@ function! s:RunGrepCmd(cmd, pattern, action)
         let maxHeight = max([ &lines / 4, winheight(0) ])
         let targetHeight = min([ targetHeight, maxHeight ])
         exec "resize ".targetHeight
-        " We can set a nice title, but with statusline it does not survive :colder and :cnewer
-        let &l:statusline = 'Search results for ' . a:pattern . ' %=(%l/%L)'
-        " If this plugin is present, it can restore the title after :colder and :cnewer
+
+        " We can set a nice statusline title
+        let count_results = line('$') - 1   " -1 because of the one line printed above
+        let &l:statusline = count_results . ' search results for ' . a:pattern . ' %=(%l/%L)'
+        " In vanilla vim the statusline does not survive :colder and :cnewer but
+        " if this plugin is present it can restore the title after :colder and :cnewer
         if exists('*g:SetQuickfixTitle')
             call g:SetQuickfixTitle(&l:statusline)
         endif
